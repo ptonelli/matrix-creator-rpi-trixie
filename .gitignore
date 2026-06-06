@@ -1,0 +1,19 @@
+# Build artifacts
+*.ko
+*.o
+*.mod
+*.mod.c
+*.cmd
+*.symvers
+*.order
+.tmp_versions/
+*.dtbo
+
+# Editor / backup files
+*.orig
+*.bak
+*~
+
+# Third-party binary fetched at install time (not redistributed here)
+system_creator.bit
+*.deb

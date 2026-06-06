@@ -1,0 +1,319 @@
+diff --git a/src/Kbuild b/src/Kbuild
+index eca1d1d..ffa22d5 100644
+--- a/src/Kbuild
++++ b/src/Kbuild
+@@ -1,12 +1,12 @@
+ obj-m += matrixio-core.o
+-obj-m += matrixio-uart.o
+ obj-m += matrixio-everloop.o
+ obj-m += matrixio-codec.o
+ obj-m += matrixio-mic.o
+ obj-m += matrixio-playback.o
+ obj-m += matrixio-gpio.o
++obj-m += matrixio-regmap.o
+ obj-m += matrixio-env.o
+ obj-m += matrixio-imu.o
+-obj-m += matrixio-regmap.o
++obj-m += matrixio-uart.o
+ 
+ ccflags-y := -Wno-missing-attributes
+diff --git a/src/matrixio-codec.c b/src/matrixio-codec.c
+index 18b3435..1df889b 100644
+--- a/src/matrixio-codec.c
++++ b/src/matrixio-codec.c
+@@ -151,7 +151,7 @@ static int matrixio_probe(struct platform_device *pdev)
+ 	return ret;
+ }
+ 
+-static int matrixio_codec_remove(struct platform_device *pdev) { return 0; }
++static void matrixio_codec_remove(struct platform_device *pdev) { }
+ 
+ static const struct of_device_id snd_matrixio_codec_of_match[] = {
+     {
+diff --git a/src/matrixio-env.c b/src/matrixio-env.c
+index 1916e5b..72b61fe 100644
+--- a/src/matrixio-env.c
++++ b/src/matrixio-env.c
+@@ -99,11 +99,11 @@ static int matrixio_env_read_raw(struct iio_dev *indio_dev,
+ 	int ret;
+ 	struct matrixio_env_data env_data;
+ 
+-	mutex_lock(&indio_dev->mlock);
++	mutex_lock(&data->lock);
+ 	ret = matrixio_read(data->mio,
+ 			    MATRIXIO_MCU_BASE + (MATRIXIO_SRAM_OFFSET_ENV >> 1),
+ 			    sizeof(env_data), &env_data);
+-	mutex_unlock(&indio_dev->mlock);
++	mutex_unlock(&data->lock);
+ 
+ 	switch (mask) {
+ 	case IIO_CHAN_INFO_RAW:
+@@ -172,13 +172,13 @@ static int matrixio_env_probe(struct platform_device *pdev)
+ 	return iio_device_register(indio_dev);
+ }
+ 
+-static int matrixio_env_remove(struct platform_device *pdev)
++static void matrixio_env_remove(struct platform_device *pdev)
+ {
+ 	struct iio_dev *indio_dev = dev_get_drvdata(&pdev->dev);
+ 
+ 	iio_device_unregister(indio_dev);
+ 
+-	return 0;
++	return;
+ }
+ 
+ static struct platform_driver matrixio_env_driver = {
+diff --git a/src/matrixio-everloop.c b/src/matrixio-everloop.c
+index 0975114..efaea55 100644
+--- a/src/matrixio-everloop.c
++++ b/src/matrixio-everloop.c
+@@ -42,7 +42,7 @@ struct file_operations matrixio_everloop_file_operations = {
+     .open = matrixio_everloop_open,
+     .write = matrixio_everloop_write};
+ 
+-static int matrixio_everloop_uevent(struct device *d,
++static int matrixio_everloop_uevent(const struct device *d,
+ 				    struct kobj_uevent_env *env)
+ {
+ 	add_uevent_var(env, "DEVMODE=%#o", 0666);
+@@ -63,7 +63,7 @@ static int matrixio_everloop_probe(struct platform_device *pdev)
+ 	el->mio = dev_get_drvdata(pdev->dev.parent);
+ 
+ 	alloc_chrdev_region(&el->devt, 0, 1, "matrixio_everloop");
+-	el->cl = class_create(THIS_MODULE, "matrixio_everloop");
++	el->cl = class_create("matrixio_everloop");
+ 
+ 	el->cl->dev_uevent = matrixio_everloop_uevent;
+ 
+@@ -81,13 +81,13 @@ static int matrixio_everloop_probe(struct platform_device *pdev)
+ 	return 0;
+ }
+ 
+-static int matrixio_everloop_remove(struct platform_device *pdev)
++static void matrixio_everloop_remove(struct platform_device *pdev)
+ {
+ 	struct everloop_data *el = dev_get_drvdata(&pdev->dev);
+ 
+ 	unregister_chrdev(el->major, "matrixio_everloop");
+ 
+-	return 0;
++	return;
+ }
+ 
+ static struct platform_driver matrixio_everloop_driver = {
+diff --git a/src/matrixio-gpio.c b/src/matrixio-gpio.c
+index 492de0e..6b63c0b 100644
+--- a/src/matrixio-gpio.c
++++ b/src/matrixio-gpio.c
+@@ -1,3 +1,4 @@
++#include <linux/gpio/driver.h>
+ #include <linux/bitops.h>
+ #include <linux/fs.h>
+ #include <linux/gpio.h>
+@@ -136,13 +137,13 @@ static int matrixio_gpio_probe(struct platform_device *pdev)
+ 	return 0;
+ }
+ 
+-static int matrixio_gpio_remove(struct platform_device *pdev)
++static void matrixio_gpio_remove(struct platform_device *pdev)
+ {
+ 
+ 	struct matrixio_gpio *gpio;
+ 	gpio = dev_get_drvdata(&pdev->dev);
+ 	mutex_destroy(&gpio->lock);
+-	return 0;
++	return;
+ }
+ 
+ static struct platform_driver matrixio_gpio_driver = {
+diff --git a/src/matrixio-imu.c b/src/matrixio-imu.c
+index fc57681..5ad2eb3 100644
+--- a/src/matrixio-imu.c
++++ b/src/matrixio-imu.c
+@@ -120,13 +120,13 @@ static int matrixio_imu_write_raw(struct iio_dev *indio_dev,
+ 	if (mask == IIO_CHAN_INFO_CALIBBIAS) {
+ 
+ 		data_write = matrixio_int_plus_micro_to_int(val, val2);
+-		mutex_lock(&indio_dev->mlock);
++		mutex_lock(&data->lock);
+ 		ret = matrixio_write(data->mio,
+ 				     MATRIXIO_MCU_BASE +
+ 					 (MATRIXIO_SRAM_OFFSET_IMU >> 1) +
+ 					 chan->address + MATRIXIO_CALIB_OFFSET,
+ 				     sizeof(data_write), &data_write);
+-		mutex_unlock(&indio_dev->mlock);
++		mutex_unlock(&data->lock);
+ 		return ret;
+ 	}
+ 
+@@ -153,13 +153,13 @@ static int matrixio_imu_read_raw(struct iio_dev *indio_dev,
+ 		return -EINVAL;
+ 	}
+ 
+-	mutex_lock(&indio_dev->mlock);
++	mutex_lock(&data->lock);
+ 	ret = matrixio_read(data->mio,
+ 			    MATRIXIO_MCU_BASE +
+ 				(MATRIXIO_SRAM_OFFSET_IMU >> 1) + offset,
+ 			    sizeof(data_read), &data_read);
+ 
+-	mutex_unlock(&indio_dev->mlock);
++	mutex_unlock(&data->lock);
+ 
+ 	if (ret)
+ 		return ret;
+@@ -203,13 +203,13 @@ static int matrixio_imu_probe(struct platform_device *pdev)
+ 	return iio_device_register(indio_dev);
+ }
+ 
+-static int matrixio_imu_remove(struct platform_device *pdev)
++static void matrixio_imu_remove(struct platform_device *pdev)
+ {
+ 	struct iio_dev *indio_dev = dev_get_drvdata(&pdev->dev);
+ 
+ 	iio_device_unregister(indio_dev);
+ 
+-	return 0;
++	return;
+ }
+ 
+ static struct platform_driver matrixio_imu_driver = {
+diff --git a/src/matrixio-playback.c b/src/matrixio-playback.c
+index 382212f..bd194b6 100644
+--- a/src/matrixio-playback.c
++++ b/src/matrixio-playback.c
+@@ -21,6 +21,8 @@
+ #include <linux/kfifo.h>
+ #include <linux/kthread.h>
+ #include <linux/module.h>
++#include <linux/slab.h>
++#include <linux/uio.h>
+ #include <linux/moduleparam.h>
+ #include <linux/platform_device.h>
+ #include <linux/version.h>
+@@ -226,17 +228,22 @@ matrixio_playback_pointer(struct snd_soc_component *component, struct snd_pcm_su
+ }
+ 
+ static int matrixio_playback_copy(struct snd_soc_component *component, struct snd_pcm_substream *substream,
+-				  int channel, snd_pcm_uframes_t pos,
+-				  void __user *buf, snd_pcm_uframes_t bytes)
++				  int channel, unsigned long pos,
++				  struct iov_iter *iter, unsigned long bytes)
+ {
+-	int ret;
+-	unsigned int copied;
++	size_t copied;
++	void *tmp;
+ 
+ 	struct snd_pcm_runtime *runtime = substream->runtime;
+ 
+ 	int frame_count = bytes_to_frames(runtime, bytes);
+ 
+-	ret = kfifo_from_user(&pcm_fifo, buf, bytes, &copied);
++	tmp = kmalloc(bytes, GFP_KERNEL);
++	if (!tmp)
++		return -ENOMEM;
++	copied = copy_from_iter(tmp, bytes, iter);
++	kfifo_in(&pcm_fifo, tmp, copied);
++	kfree(tmp);
+ 	up(&sem);
+ 
+ 	return frame_count;
+@@ -332,7 +339,7 @@ static const struct snd_soc_component_driver matrixio_soc_platform = {
+     .hw_free = matrixio_playback_hw_free,
+     .prepare = matrixio_playback_prepare,
+     .pointer = matrixio_playback_pointer,
+-    .copy_user = matrixio_playback_copy,
++    .copy = matrixio_playback_copy,
+     .close = matrixio_playback_close,
+ };
+ 
+diff --git a/src/matrixio-regmap.c b/src/matrixio-regmap.c
+index 29eb7eb..cec89a0 100644
+--- a/src/matrixio-regmap.c
++++ b/src/matrixio-regmap.c
+@@ -68,7 +68,7 @@ struct file_operations matrixio_regmap_file_operations = {
+     .open = matrixio_regmap_open,
+     .unlocked_ioctl = matrixio_regmap_ioctl};
+ 
+-static int matrixio_regmap_uevent(struct device *d, struct kobj_uevent_env *env)
++static int matrixio_regmap_uevent(const struct device *d, struct kobj_uevent_env *env)
+ {
+ 	add_uevent_var(env, "DEVMODE=%#o", 0666);
+ 	return 0;
+@@ -88,7 +88,7 @@ static int matrixio_regmap_probe(struct platform_device *pdev)
+ 	el->mio = dev_get_drvdata(pdev->dev.parent);
+ 
+ 	alloc_chrdev_region(&el->devt, 0, 1, "matrixio_regmap");
+-	el->cl = class_create(THIS_MODULE, "matrixio_regmap");
++	el->cl = class_create("matrixio_regmap");
+ 
+ 	el->cl->dev_uevent = matrixio_regmap_uevent;
+ 
+@@ -106,13 +106,13 @@ static int matrixio_regmap_probe(struct platform_device *pdev)
+ 	return 0;
+ }
+ 
+-static int matrixio_regmap_remove(struct platform_device *pdev)
++static void matrixio_regmap_remove(struct platform_device *pdev)
+ {
+ 	struct regmap_data *el = dev_get_drvdata(&pdev->dev);
+ 
+ 	unregister_chrdev(el->major, "matrixio_regmap");
+ 
+-	return 0;
++	return;
+ }
+ 
+ static struct platform_driver matrixio_regmap_driver = {
+diff --git a/src/matrixio-uart.c b/src/matrixio-uart.c
+index 33c76e6..d31aa1d 100644
+--- a/src/matrixio-uart.c
++++ b/src/matrixio-uart.c
+@@ -77,26 +77,15 @@ static void matrixio_uart_stop_tx(struct uart_port *port) {}
+ static void matrixio_uart_start_tx(struct uart_port *port)
+ {
+ 	struct matrixio_uart_status uart_status;
++	u8 ch;
+ 	spin_lock(&conf_lock);
+-
+-	while (1) {
++	uart_port_tx(port, ch, true, ({
+ 		do {
+ 			matrixio_read(matrixio, MATRIXIO_UART_BASE + 0x100,
+-				      sizeof(uart_status),
+-				      (void *)&uart_status);
++				      sizeof(uart_status), (void *)&uart_status);
+ 		} while (uart_status.uart_tx_busy);
+-
+-		matrixio_reg_write(
+-		    matrixio, MATRIXIO_UART_BASE + 0x101,
+-		    port->state->xmit.buf[port->state->xmit.tail]);
+-		port->state->xmit.tail =
+-		    (port->state->xmit.tail + 1) & (UART_XMIT_SIZE - 1);
+-		port->icount.tx++;
+-
+-		if (uart_circ_empty(&port->state->xmit))
+-			break;
+-	}
+-
++		matrixio_reg_write(matrixio, MATRIXIO_UART_BASE + 0x101, ch);
++	}));
+ 	spin_unlock(&conf_lock);
+ }
+ 
+@@ -239,12 +228,11 @@ static int matrixio_uart_probe(struct platform_device *pdev)
+ 	return ret;
+ }
+ 
+-static int matrixio_uart_remove(struct platform_device *pdev)
++static void matrixio_uart_remove(struct platform_device *pdev)
+ {
+ 	uart_remove_one_port(&matrixio_uart_driver, &port);
+ 	port.dev = NULL;
+ 	uart_unregister_driver(&matrixio_uart_driver);
+-	return 0;
+ }
+ 
+ static const struct of_device_id matrixio_uart_dt_ids[] = {
