@@ -220,7 +220,10 @@ own spatial layer in software (e.g. [ODAS](https://github.com/introlab/odas)).
 
 - **[wyoming-satellite](https://github.com/rhasspy/wyoming-satellite) → Home Assistant Assist** —
   the 8 channels are standard ALSA inputs; start mono (MVP), add beamforming later.
-- **Beamforming/DOA** in software (ODAS) over the 8 channels; drive the LED ring from the DOA.
+- **Beamforming/DOA** in software over the 8 channels; drive the LED ring from the DOA.
+  ✅ Working example: [`examples/mic-array-doa`](examples/mic-array-doa) — SRP-PHAT DOA,
+  delay-and-sum beam, Everloop calibration, and a live "light the LED pointing at the
+  talker" demo (width ∝ loudness, color ∝ pitch).
 - **ZigBee EM358**: build `matrix-creator-openocd`, flash the NCP firmware
   (`blob/ncp_xon_xoff.hex` via `em358-program.bash`), then run zigbee2mqtt.
 - **Calibrate the sensor decoding** (interpret as float) for proper physical units.
